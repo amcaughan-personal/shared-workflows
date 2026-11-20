@@ -1,6 +1,6 @@
 name: security-scan
 
-# Runs checkov, trivy, gitleaks and actionlint, combines their SARIF output into one
+# Runs checkov (optional, for infrastructure code), trivy, gitleaks and actionlint, combines their SARIF output into one
 # HTML report, and posts it as a single (updated in place) PR comment.
 #
 #   jobs:
@@ -25,6 +25,11 @@ on:
         default: "vuln,license"
       scan_git_history:
         description: "Scan full git history with gitleaks (slower)"
+        type: boolean
+        required: false
+        default: true
+      checkov:
+        description: "Run Checkov (Terraform, Dockerfiles, workflows); turn off in repos without infrastructure code"
         type: boolean
         required: false
         default: true
@@ -54,6 +59,7 @@ permissions:
 
 jobs:
   checkov:
+    if: ${{ inputs.checkov }}
     uses: ./.github/workflows/scan-checkov.yml
     with:
       scan_path: ${{ inputs.scan_path }}
