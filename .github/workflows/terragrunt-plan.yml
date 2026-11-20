@@ -146,7 +146,7 @@ jobs:
               fi
 
               "${cmd[@]}"
-              terraform show -json "$plan_path" > "$json_path"
+              terragrunt --non-interactive show -json "$plan_path" > "$json_path"
             )
 
             printf '%s\t%s\t%s\n' "$safe_stack" "$stack_path" "$json_path" >> "$raw_dir/index.tsv"
