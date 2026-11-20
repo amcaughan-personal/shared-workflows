@@ -89,10 +89,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: ${{ inputs.terraform_version }}
           terraform_wrapper: false
@@ -108,7 +108,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: ${{ inputs.aws_role_to_assume != '' && inputs.aws_region != '' }}
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ inputs.aws_role_to_assume }}
           aws-region: ${{ inputs.aws_region }}
@@ -154,7 +154,7 @@ jobs:
 
       # The report actions live in this repo, at the commit this workflow runs from.
       - name: Checkout shared_workflows
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -170,7 +170,7 @@ jobs:
           out_html: ${{ inputs.html_summary_path }}
 
       - name: Upload plan report artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.report_artifact_name }}
           path: |
