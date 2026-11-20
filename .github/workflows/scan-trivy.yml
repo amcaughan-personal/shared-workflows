@@ -43,6 +43,11 @@ on:
         type: string
         required: false
         default: ".git,node_modules,.terraform,.terragrunt-cache"
+      fail_on_severity:
+        description: "Fail the job on fixable vulnerabilities of these severities, e.g. HIGH,CRITICAL (empty: report only)"
+        type: string
+        required: false
+        default: ""
       trivy_args:
         description: "Extra args passed to trivy"
         type: string
@@ -117,6 +122,19 @@ jobs:
           path: out/${{ inputs.sarif_filename }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Fail on fixable vulnerabilities (optional)
+        if: ${{ inputs.fail_on_severity != '' }}
+        shell: bash
+        env:
+          SEVERITY: ${{ inputs.fail_on_severity }}
+          SKIP_DIRS: ${{ inputs.skip_dirs }}
+          SCAN_PATH: ${{ inputs.scan_path }}
+        run: |
+          set -euo pipefail
+          # The SARIF report above lists everything; this only decides pass/fail.
+          trivy fs --scanners vuln --severity "$SEVERITY" --ignore-unfixed --exit-code 1 \
+            ${SKIP_DIRS:+--skip-dirs "$SKIP_DIRS"} "$SCAN_PATH"
 
       - name: Expose outputs
         id: out
