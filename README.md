@@ -7,7 +7,7 @@ Reusable GitHub Actions workflows for the repos in this org, so CI is defined on
 | Workflow | Does | Used by |
 |---|---|---|
 | [`python-checks.yml`](.github/workflows/python-checks.yml) | `uv sync --locked`, `ruff check`, `ruff format --check`, `pytest` | data-simulator-api |
-| [`security-scan.yml`](.github/workflows/security-scan.yml) | checkov, trivy, gitleaks and actionlint, combined into one report and PR comment. Fails on any Checkov finding (skip deliberate ones inline), fixable HIGH/CRITICAL vulnerabilities, leaked secrets or workflow errors | all repos |
+| [`security-scan.yml`](.github/workflows/security-scan.yml) | checkov, trivy, gitleaks and actionlint, combined into one report and PR comment. Fails on any Checkov finding (skip deliberate ones inline), fixable HIGH/CRITICAL vulnerabilities, leaked secrets or workflow errors. Comments only when there are findings (`comment_when_clean: true` to always comment) | all repos |
 | [`format-check.yml`](.github/workflows/format-check.yml) | `terraform fmt`, `terragrunt hcl format`, `bash -n` | repos with Terraform |
 | [`terragrunt-plan.yml`](.github/workflows/terragrunt-plan.yml) | read-only `terragrunt plan` via AWS OIDC, with a sanitised report and PR comment | data-simulator-elt |
 
