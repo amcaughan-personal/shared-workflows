@@ -28,6 +28,16 @@ on:
         type: boolean
         required: false
         default: true
+      checkov_fail_on_findings:
+        description: "Fail when Checkov reports a finding (skip deliberate ones inline)"
+        type: boolean
+        required: false
+        default: true
+      trivy_fail_on_severity:
+        description: "Fail on fixable vulnerabilities of these severities (empty: report only)"
+        type: string
+        required: false
+        default: "HIGH,CRITICAL"
       report_title:
         description: "Title of the combined report"
         type: string
@@ -42,12 +52,14 @@ jobs:
     uses: ./.github/workflows/scan-checkov.yml
     with:
       scan_path: ${{ inputs.scan_path }}
+      fail_on_findings: ${{ inputs.checkov_fail_on_findings }}
 
   trivy:
     uses: ./.github/workflows/scan-trivy.yml
     with:
       scan_path: ${{ inputs.scan_path }}
       scanners: ${{ inputs.trivy_scanners }}
+      fail_on_severity: ${{ inputs.trivy_fail_on_severity }}
 
   gitleaks:
     uses: ./.github/workflows/scan-gitleaks.yml
