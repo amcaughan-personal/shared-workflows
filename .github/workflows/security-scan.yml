@@ -38,6 +38,11 @@ on:
         type: string
         required: false
         default: "HIGH,CRITICAL"
+      comment_when_clean:
+        description: "Also comment when there are no findings (by default only an existing comment is updated)"
+        type: boolean
+        required: false
+        default: false
       report_title:
         description: "Title of the combined report"
         type: string
@@ -114,8 +119,22 @@ jobs:
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Count findings
+        id: count
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, json
+          total = 0
+          for path in glob.glob("sarif/**/*.sarif", recursive=True):
+              with open(path) as fh:
+                  for run in json.load(fh).get("runs", []):
+                      # Results skipped on purpose (inline, with a reason) aren't findings.
+                      total += sum(1 for r in run.get("results", []) if not r.get("suppressions"))
+          print(f"findings={total}")
+          PY
+
       - name: Build PR comment
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && (steps.count.outputs.findings != '0' || inputs.comment_when_clean) }}
         env:
           TITLE: ${{ inputs.report_title }}
         run: |
@@ -130,9 +149,28 @@ jobs:
           } > out/pr-comment.md
 
       - name: Comment on PR (updated in place)
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && (steps.count.outputs.findings != '0' || inputs.comment_when_clean) }}
         uses: ./.shared-workflows/.github/actions/comment-pr
         with:
           comment_name: security-report
           body_file: out/pr-comment.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Clean run: don't start a new comment, but fix up one left by an earlier run so it
+      # doesn't keep showing findings that are gone.
+      - name: Mark an earlier comment as resolved
+        if: ${{ github.event_name == 'pull_request' && steps.count.outputs.findings == '0' && !inputs.comment_when_clean }}
+        env:
+          TITLE: ${{ inputs.report_title }}
+        run: |
+          mkdir -p out
+          printf '## %s\n\nNo findings: everything reported earlier on this PR is fixed.\n' "$TITLE" > out/pr-comment-clean.md
+
+      - name: Update earlier comment, if any
+        if: ${{ github.event_name == 'pull_request' && steps.count.outputs.findings == '0' && !inputs.comment_when_clean }}
+        uses: ./.shared-workflows/.github/actions/comment-pr
+        with:
+          comment_name: security-report
+          body_file: out/pr-comment-clean.md
+          mode: update
           token: ${{ secrets.GITHUB_TOKEN }}
