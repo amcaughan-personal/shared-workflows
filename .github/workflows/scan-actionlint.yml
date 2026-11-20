@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # actionlint's recommended download script :contentReference[oaicite:2]{index=2}
+          # actionlint's recommended download script
           if [[ "${{ inputs.actionlint_version }}" == "latest" ]]; then
             bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           else
@@ -89,7 +89,7 @@ jobs:
             cmd+=("${extra[@]}")
           fi
 
-          # Run against default discovery (all workflows) :contentReference[oaicite:3]{index=3}
+          # Run against default discovery (all workflows)
           "${cmd[@]}" > "out/${{ inputs.sarif_filename }}"
           rc=$?
           set -e
@@ -114,5 +114,6 @@ jobs:
       - name: Fail if findings (optional)
         if: ${{ inputs.fail_on_findings }}
         shell: bash
-        run: |
-          exit "${{ steps.run.outputs.exit_code }}"
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: exit "$EXIT_CODE"
