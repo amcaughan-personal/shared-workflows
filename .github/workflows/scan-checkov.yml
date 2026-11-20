@@ -23,6 +23,11 @@ on:
         type: string
         required: false
         default: "checkov.sarif"
+      checkov_version:
+        description: "Checkov version (pinned so new rules arrive when you choose, not at random)"
+        type: string
+        required: false
+        default: "3.4.3"
       checkov_args:
         description: "Extra args passed to checkov"
         type: string
@@ -55,27 +60,29 @@ jobs:
       sarif_path: ${{ steps.out.outputs.sarif_path }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python_version }}
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ inputs.python_version }}-checkov
+          key: pip-${{ runner.os }}-${{ inputs.python_version }}-checkov-${{ inputs.checkov_version }}
           restore-keys: |
             pip-${{ runner.os }}-${{ inputs.python_version }}-
             pip-${{ runner.os }}-
 
       - name: Install Checkov
         shell: bash
+        env:
+          CHECKOV_VERSION: ${{ inputs.checkov_version }}
         run: |
           python -m pip install --upgrade pip
-          pip install checkov
+          pip install "checkov==$CHECKOV_VERSION"
 
       - name: Run Checkov (SARIF)
         id: run
@@ -94,7 +101,7 @@ jobs:
 
 
       - name: Upload SARIF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
           path: out/${{ inputs.sarif_filename }}

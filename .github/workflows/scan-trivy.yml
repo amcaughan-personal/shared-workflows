@@ -12,7 +12,7 @@ on:
         description: "Trivy version (e.g. v0.69.3). Required if cache=true."
         type: string
         required: false
-        default: "v0.69.3"
+        default: "v0.76.2"
       cache_trivy_binary:
         description: "Cache Trivy binary"
         type: boolean
@@ -70,10 +70,10 @@ jobs:
       sarif_path: ${{ steps.out.outputs.sarif_path }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Trivy
-        uses: aquasecurity/setup-trivy@v0.2.6
+        uses: aquasecurity/setup-trivy@v0.3.1
         with:
           version: ${{ inputs.trivy_version }}
           cache: ${{ inputs.cache_trivy_binary }}
@@ -111,7 +111,7 @@ jobs:
           "${cmd[@]}"
 
       - name: Upload SARIF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
           path: out/${{ inputs.sarif_filename }}
