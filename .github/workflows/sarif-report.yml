@@ -49,13 +49,13 @@ jobs:
 
     steps:
       - name: Download SARIF artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: sarif
 
       # The report actions live in this repo, at the commit this workflow runs from.
       - name: Checkout shared_workflows
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -69,7 +69,7 @@ jobs:
           out_html: ${{ inputs.out_html }}
 
       - name: Upload HTML report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.report_artifact_name }}
           path: ${{ inputs.out_html }}

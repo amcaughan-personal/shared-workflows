@@ -17,7 +17,7 @@ on:
         description: "Terraform version to install"
         type: string
         required: false
-        default: "latest"
+        default: "1.14.2"  # keep in step with the local dev images
       terragrunt_version:
         description: "Terragrunt version to install"
         type: string
@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4

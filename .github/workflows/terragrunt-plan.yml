@@ -31,7 +31,7 @@ on:
         description: "Terraform version to install"
         type: string
         required: false
-        default: "latest"
+        default: "1.14.2"  # keep in step with the local dev images
       terragrunt_version:
         description: "Terragrunt version to install"
         type: string
@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
@@ -108,7 +108,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: ${{ inputs.aws_role_to_assume != '' && inputs.aws_region != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ inputs.aws_role_to_assume }}
           aws-region: ${{ inputs.aws_region }}
@@ -154,7 +154,7 @@ jobs:
 
       # The report actions live in this repo, at the commit this workflow runs from.
       - name: Checkout shared_workflows
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -170,7 +170,7 @@ jobs:
           out_html: ${{ inputs.html_summary_path }}
 
       - name: Upload plan report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.report_artifact_name }}
           path: |
