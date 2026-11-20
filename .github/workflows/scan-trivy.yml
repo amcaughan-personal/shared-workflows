@@ -83,6 +83,19 @@ jobs:
           version: ${{ inputs.trivy_version }}
           cache: ${{ inputs.cache_trivy_binary }}
 
+      # Trivy's vulnerability database is refreshed upstream every few hours. Keep one copy
+      # per day; Trivy only downloads a newer one when the cached copy is out of date.
+      - name: Date for the database cache
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Trivy database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ steps.date.outputs.today }}
+          restore-keys: trivy-db-
+
       - name: Run Trivy (SARIF)
         shell: bash
         run: |

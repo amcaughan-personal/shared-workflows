@@ -8,11 +8,6 @@ on:
         type: string
         required: false
         default: "."
-      python_version:
-        description: "Python version for Checkov"
-        type: string
-        required: false
-        default: "3.12"
       artifact_name:
         description: "Artifact name for SARIF output"
         type: string
@@ -23,11 +18,11 @@ on:
         type: string
         required: false
         default: "checkov.sarif"
-      checkov_version:
-        description: "Checkov version (pinned so new rules arrive when you choose, not at random)"
+      checkov_image:
+        description: "Checkov's official image, pinned by version and digest so new rules arrive when you choose"
         type: string
         required: false
-        default: "3.4.3"
+        default: "bridgecrew/checkov:3.4.5@sha256:122602cf32cc72286155d39f1f234b7b594818f7b8d7fdf490701620e521368b"
       checkov_args:
         description: "Extra args passed to checkov"
         type: string
@@ -62,43 +57,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ inputs.python_version }}
-
-      - name: Cache pip
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ inputs.python_version }}-checkov-${{ inputs.checkov_version }}
-          restore-keys: |
-            pip-${{ runner.os }}-${{ inputs.python_version }}-
-            pip-${{ runner.os }}-
-
-      - name: Install Checkov
-        shell: bash
-        env:
-          CHECKOV_VERSION: ${{ inputs.checkov_version }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install "checkov==$CHECKOV_VERSION"
-
       - name: Run Checkov (SARIF)
         id: run
         shell: bash
+        env:
+          IMAGE: ${{ inputs.checkov_image }}
+          SCAN_PATH: ${{ inputs.scan_path }}
+          SARIF: out/${{ inputs.sarif_filename }}
+          EXTRA_ARGS: ${{ inputs.checkov_args }}
         run: |
           set -euo pipefail
           mkdir -p out
           set +e
-          checkov -d "${{ inputs.scan_path }}" \
-          -o sarif \
-          --output-file-path "out/${{ inputs.sarif_filename }}" \
-          ${{ inputs.checkov_args }}
+          # shellcheck disable=SC2086 # EXTRA_ARGS is a space-separated list of flags
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/repo" -w /repo "$IMAGE" \
+            -d "$SCAN_PATH" -o sarif --output-file-path "$SARIF" $EXTRA_ARGS
           rc=$?
           set -e
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
-
 
       - name: Upload SARIF artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
