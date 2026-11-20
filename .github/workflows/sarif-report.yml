@@ -53,8 +53,16 @@ jobs:
         with:
           path: sarif
 
+      # The report actions live in this repo, at the commit this workflow runs from.
+      - name: Checkout shared_workflows
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .shared-workflows
+
       - name: Generate SARIF HTML report
-        uses: amcaughan/shared_workflows/.github/actions/sarif-report@main
+        uses: ./.shared-workflows/.github/actions/sarif-report
         with:
           title: ${{ inputs.title }}
           sarif_glob: ${{ inputs.sarif_glob }}

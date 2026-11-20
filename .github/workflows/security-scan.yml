@@ -1,0 +1,126 @@
+name: security-scan
+
+# Runs checkov, trivy, gitleaks and actionlint, combines their SARIF output into one
+# HTML report, and posts it as a single (updated in place) PR comment.
+#
+#   jobs:
+#     security:
+#       uses: amcaughan-personal/shared_workflows/.github/workflows/security-scan.yml@<sha> # v1.0.0
+#       permissions:
+#         contents: read
+#         pull-requests: write   # for the PR comment
+
+on:
+  workflow_call:
+    inputs:
+      scan_path:
+        description: "Path to scan with checkov and trivy"
+        type: string
+        required: false
+        default: "."
+      trivy_scanners:
+        description: "Comma-separated trivy scanners"
+        type: string
+        required: false
+        default: "vuln,license"
+      scan_git_history:
+        description: "Scan full git history with gitleaks (slower)"
+        type: boolean
+        required: false
+        default: true
+      report_title:
+        description: "Title of the combined report"
+        type: string
+        required: false
+        default: "Repo security report"
+
+permissions:
+  contents: read
+
+jobs:
+  checkov:
+    uses: ./.github/workflows/scan-checkov.yml
+    with:
+      scan_path: ${{ inputs.scan_path }}
+
+  trivy:
+    uses: ./.github/workflows/scan-trivy.yml
+    with:
+      scan_path: ${{ inputs.scan_path }}
+      scanners: ${{ inputs.trivy_scanners }}
+
+  gitleaks:
+    uses: ./.github/workflows/scan-gitleaks.yml
+    with:
+      redact: true
+      scan_history: ${{ inputs.scan_git_history }}
+
+  actionlint:
+    uses: ./.github/workflows/scan-actionlint.yml
+
+  report:
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: [checkov, trivy, gitleaks, actionlint]
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # The report actions live in this repo, at the commit this workflow runs from.
+      - name: Checkout shared_workflows
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .shared-workflows
+
+      - name: Download SARIF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: sarif
+
+      - name: Build HTML report
+        uses: ./.shared-workflows/.github/actions/sarif-report
+        with:
+          title: ${{ inputs.report_title }}
+          sarif_glob: "sarif/**/*.sarif"
+          out_html: out/security-report.html
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: out/security-report.html
+          retention-days: 14
+
+      - name: Attach report to step summary
+        run: |
+          {
+            echo "<details open><summary>Security report</summary>"
+            cat out/security-report.html
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build PR comment
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          TITLE: ${{ inputs.report_title }}
+        run: |
+          {
+            echo "## $TITLE"
+            echo ""
+            echo "<details open><summary>Report</summary>"
+            echo ""
+            cat out/security-report.html
+            echo ""
+            echo "</details>"
+          } > out/pr-comment.md
+
+      - name: Comment on PR (updated in place)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: ./.shared-workflows/.github/actions/comment-pr
+        with:
+          comment_name: security-report
+          body_file: out/pr-comment.md
+          token: ${{ secrets.GITHUB_TOKEN }}

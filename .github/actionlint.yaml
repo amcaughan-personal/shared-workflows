@@ -1,0 +1,7 @@
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      # job.workflow_repository / job.workflow_sha are documented GitHub contexts (the
+      # reusable workflow's own repo and commit). actionlint <= 1.7.12 doesn't know them
+      # yet (rhysd/actionlint#757); remove this once a release includes the fix.
+      - 'property "workflow_(repository|sha)" is not defined'
