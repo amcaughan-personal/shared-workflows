@@ -25,16 +25,14 @@ permissions:
   contents: read
 jobs:
   python:
-    uses: amcaughan-personal/shared_workflows/.github/workflows/python-checks.yml@<commit sha> # v1.0.0
+    uses: amcaughan-personal/shared_workflows/.github/workflows/python-checks.yml@<commit sha on main>
 ```
 
-Pin the **commit SHA** of a release tag, with the tag as a comment. A tag can be moved; a SHA can't. Tags matching `v*` are also protected from deletion and retargeting by a repository ruleset.
+Pin a **commit SHA** from `main`, not a branch name: the caller then runs exactly the code it was tested with, and nothing changes underneath it.
 
-## Releasing
+## Updating callers
 
-1. Merge changes to `main` (CI runs actionlint and the unit tests on every PR).
-2. Tag the merge commit, e.g. `v1.1.0`, and push the tag.
-3. Bump the pinned SHA in the calling repos.
+There are no releases or tags; with one owner and a handful of repos, they'd be ceremony. When a change here is worth picking up, merge it to `main` (CI runs actionlint and the unit tests on every PR) and bump the SHA in the calling repos.
 
 ## How it works
 
