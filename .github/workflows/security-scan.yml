@@ -5,7 +5,7 @@ name: security-scan
 #
 #   jobs:
 #     security:
-#       uses: amcaughan-personal/shared_workflows/.github/workflows/security-scan.yml@<sha> # v1.0.0
+#       uses: amcaughan-personal/shared_workflows/.github/workflows/security-scan.yml@<commit sha on main>
 #       permissions:
 #         contents: read
 #         pull-requests: write   # for the PR comment
