@@ -14,3 +14,9 @@ updates:
     ignore:
       # Shared workflows are pinned to a main commit and bumped on purpose.
       - dependency-name: "amcaughan-personal/*"
+  - package-ecosystem: docker
+    directory: /.github/images/checkov
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

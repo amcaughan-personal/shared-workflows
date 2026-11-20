@@ -19,10 +19,10 @@ on:
         required: false
         default: "checkov.sarif"
       checkov_image:
-        description: "Checkov's official image, pinned by version and digest so new rules arrive when you choose"
+        description: "Checkov image to run instead of the pinned one in .github/images/checkov/Dockerfile"
         type: string
         required: false
-        default: "bridgecrew/checkov:3.4.5@sha256:122602cf32cc72286155d39f1f234b7b594818f7b8d7fdf490701620e521368b"
+        default: ""
       checkov_args:
         description: "Extra args passed to checkov"
         type: string
@@ -57,11 +57,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The pinned image lives in this repo (so Dependabot can update it), at the commit
+      # this workflow runs from.
+      - name: Read the pinned Checkov image
+        id: image
+        if: ${{ inputs.checkov_image == '' }}
+        env:
+          REPO: ${{ job.workflow_repository }}
+          SHA: ${{ job.workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image=$(gh api "repos/$REPO/contents/.github/images/checkov/Dockerfile?ref=$SHA" \
+            -H "Accept: application/vnd.github.raw" | awk '/^FROM /{print $2}')
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
       - name: Run Checkov (SARIF)
         id: run
         shell: bash
         env:
-          IMAGE: ${{ inputs.checkov_image }}
+          IMAGE: ${{ inputs.checkov_image || steps.image.outputs.image }}
           SCAN_PATH: ${{ inputs.scan_path }}
           SARIF: out/${{ inputs.sarif_filename }}
           EXTRA_ARGS: ${{ inputs.checkov_args }}
