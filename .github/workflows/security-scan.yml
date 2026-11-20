@@ -1,7 +1,7 @@
 name: security-scan
 
-# Runs checkov (optional, for infrastructure code), trivy, gitleaks and actionlint, combines their SARIF output into one
-# HTML report, and posts it as a single (updated in place) PR comment.
+# Runs the selected scans (checkov, trivy, gitleaks, actionlint; all by default), combines
+# their SARIF output into one HTML report, and comments on the PR when there are findings.
 #
 #   jobs:
 #     security:
@@ -9,10 +9,17 @@ name: security-scan
 #       permissions:
 #         contents: read
 #         pull-requests: write   # for the PR comment
+#       with:
+#         scans: "trivy, gitleaks, actionlint"   # e.g. no infrastructure code, so no checkov
 
 on:
   workflow_call:
     inputs:
+      scans:
+        description: "Comma-separated scans to run: checkov (infrastructure code), trivy, gitleaks, actionlint"
+        type: string
+        required: false
+        default: "checkov, trivy, gitleaks, actionlint"
       scan_path:
         description: "Path to scan with checkov and trivy"
         type: string
@@ -25,11 +32,6 @@ on:
         default: "vuln,license"
       scan_git_history:
         description: "Scan full git history with gitleaks (slower)"
-        type: boolean
-        required: false
-        default: true
-      checkov:
-        description: "Run Checkov (Terraform, Dockerfiles, workflows); turn off in repos without infrastructure code"
         type: boolean
         required: false
         default: true
@@ -58,14 +60,46 @@ permissions:
   contents: read
 
 jobs:
+  # Turn the scans list into one flag per scan; an unknown name fails rather than
+  # silently skipping a scan.
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      checkov: ${{ steps.select.outputs.checkov }}
+      trivy: ${{ steps.select.outputs.trivy }}
+      gitleaks: ${{ steps.select.outputs.gitleaks }}
+      actionlint: ${{ steps.select.outputs.actionlint }}
+    steps:
+      - id: select
+        env:
+          SCANS: ${{ inputs.scans }}
+        run: |
+          known="checkov trivy gitleaks actionlint"
+          selected=" $(echo "$SCANS" | tr ',' ' ' | xargs) "
+          for scan in $selected; do
+            case " $known " in
+              *" $scan "*) ;;
+              *) echo "::error::Unknown scan '$scan' (known: $known)"; exit 1 ;;
+            esac
+          done
+          for scan in $known; do
+            case "$selected" in
+              *" $scan "*) echo "$scan=true" >> "$GITHUB_OUTPUT" ;;
+              *) echo "$scan=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          done
+
   checkov:
-    if: ${{ inputs.checkov }}
+    needs: select
+    if: ${{ needs.select.outputs.checkov == 'true' }}
     uses: ./.github/workflows/scan-checkov.yml
     with:
       scan_path: ${{ inputs.scan_path }}
       fail_on_findings: ${{ inputs.checkov_fail_on_findings }}
 
   trivy:
+    needs: select
+    if: ${{ needs.select.outputs.trivy == 'true' }}
     uses: ./.github/workflows/scan-trivy.yml
     with:
       scan_path: ${{ inputs.scan_path }}
@@ -73,12 +107,16 @@ jobs:
       fail_on_severity: ${{ inputs.trivy_fail_on_severity }}
 
   gitleaks:
+    needs: select
+    if: ${{ needs.select.outputs.gitleaks == 'true' }}
     uses: ./.github/workflows/scan-gitleaks.yml
     with:
       redact: true
       scan_history: ${{ inputs.scan_git_history }}
 
   actionlint:
+    needs: select
+    if: ${{ needs.select.outputs.actionlint == 'true' }}
     uses: ./.github/workflows/scan-actionlint.yml
 
   report:
