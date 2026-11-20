@@ -127,7 +127,9 @@ jobs:
           total = 0
           for path in glob.glob("sarif/**/*.sarif", recursive=True):
               with open(path) as fh:
-                  total += sum(len(run.get("results", [])) for run in json.load(fh).get("runs", []))
+                  for run in json.load(fh).get("runs", []):
+                      # Results skipped on purpose (inline, with a reason) aren't findings.
+                      total += sum(1 for r in run.get("results", []) if not r.get("suppressions"))
           print(f"findings={total}")
           PY
 

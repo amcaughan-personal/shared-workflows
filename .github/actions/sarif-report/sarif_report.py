@@ -187,6 +187,8 @@ def sarif_to_rows(path: Path) -> List[Dict[str, str]]:
                     "help": help_uri,
                     "gh_url": gh_url,
                     "dedupe_key": dedupe,
+                    # Skipped on purpose (e.g. an inline checkov:skip with a reason).
+                    "suppressed": "yes" if res.get("suppressions") else "",
                 }
             )
 
@@ -206,6 +208,8 @@ def dedupe_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
 
 
 def html_fragment_report(rows: List[Dict[str, str]], title: str) -> str:
+    suppressed = sum(1 for r in rows if r.get("suppressed"))
+    rows = [r for r in rows if not r.get("suppressed")]
     counts = Counter(r["level"] for r in rows)
     grouped = defaultdict(lambda: defaultdict(list))
     for r in rows:
@@ -219,6 +223,8 @@ def html_fragment_report(rows: List[Dict[str, str]], title: str) -> str:
         f"{SEV_EMOJI['note']} {counts.get('note',0)} "
         f"Total: {len(rows)}</p>"
     )
+    if suppressed:
+        out.append(f"<p>{suppressed} checks skipped on purpose (each with a reason in the code).</p>")
 
     for tool in sorted(grouped):
         tc = Counter(r["level"] for v in grouped[tool].values() for r in v)
