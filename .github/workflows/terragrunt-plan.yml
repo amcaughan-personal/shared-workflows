@@ -152,8 +152,16 @@ jobs:
             printf '%s\t%s\t%s\n' "$safe_stack" "$stack_path" "$json_path" >> "$raw_dir/index.tsv"
           done <<< "$STACK_PATHS"
 
+      # The report actions live in this repo, at the commit this workflow runs from.
+      - name: Checkout shared_workflows
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .shared-workflows
+
       - name: Build sanitized plan report
-        uses: ./.github/actions/terragrunt-plan-report
+        uses: ./.shared-workflows/.github/actions/terragrunt-plan-report
         with:
           title: ${{ inputs.report_title }}
           plan_index_tsv: ${{ runner.temp }}/terragrunt-plans/index.tsv
@@ -178,7 +186,7 @@ jobs:
 
       - name: Comment report on PR (upsert)
         if: ${{ inputs.post_pr_comment && github.event_name == 'pull_request' }}
-        uses: ./.github/actions/comment-pr
+        uses: ./.shared-workflows/.github/actions/comment-pr
         with:
           comment_name: ${{ inputs.comment_name }}
           body_file: ${{ inputs.markdown_summary_path }}
