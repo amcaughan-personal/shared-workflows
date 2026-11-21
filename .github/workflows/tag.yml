@@ -1,0 +1,49 @@
+name: tag
+
+# Tags every merge to main with the next version, so other repos' Dependabot can bump
+# their pins (they pin the commit SHA, with the version in a comment). The merged PR's
+# label picks the bump: "release: major" (breaking change for callers), "release: minor"
+# (new, backwards-compatible inputs or behaviour), otherwise patch. Tags are protected
+# from being moved or deleted (personal_infra).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # to push the tag
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # all tags
+
+      - name: Tag the next version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [[ -z "$latest" ]]; then
+            next=v1.0.0
+          else
+            IFS=. read -r major minor patch <<< "${latest#v}"
+            labels=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '[.[0].labels[].name] | join(",")')
+            case ",$labels," in
+              *",release: major,"*) next="v$((major + 1)).0.0" ;;
+              *",release: minor,"*) next="v$major.$((minor + 1)).0" ;;
+              *) next="v$major.$minor.$((patch + 1))" ;;
+            esac
+          fi
+          git tag "$next" "$SHA"
+          git push origin "$next"
+          echo "Tagged $SHA as $next (previous: ${latest:-none})" >> "$GITHUB_STEP_SUMMARY"
