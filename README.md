@@ -1,4 +1,4 @@
-# shared_workflows
+# shared-workflows
 
 Reusable GitHub Actions workflows for the repos in this org, so CI is defined once and every repo calls it in a few lines.
 
@@ -25,7 +25,7 @@ permissions:
   contents: read
 jobs:
   python:
-    uses: amcaughan-personal/shared_workflows/.github/workflows/python-checks.yml@<commit sha> # v1.2.3
+    uses: amcaughan-personal/shared-workflows/.github/workflows/python-checks.yml@<commit sha> # v1.2.3
 ```
 
 Pin the **commit SHA** of a version tag, with the version in a comment: the caller runs
