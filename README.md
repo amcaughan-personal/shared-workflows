@@ -25,14 +25,22 @@ permissions:
   contents: read
 jobs:
   python:
-    uses: amcaughan-personal/shared_workflows/.github/workflows/python-checks.yml@<commit sha on main>
+    uses: amcaughan-personal/shared_workflows/.github/workflows/python-checks.yml@<commit sha> # v1.2.3
 ```
 
-Pin a **commit SHA** from `main`, not a branch name: the caller then runs exactly the code it was tested with, and nothing changes underneath it.
+Pin the **commit SHA** of a version tag, with the version in a comment: the caller runs
+exactly the code it was tested with, and Dependabot reads the comment to propose newer
+versions.
 
 ## Updating callers
 
-There are no releases or tags; with one owner and a handful of repos, they'd be ceremony. When a change here is worth picking up, merge it to `main` (CI runs actionlint and the unit tests on every PR) and bump the SHA in the calling repos.
+Every merge to `main` is tagged automatically ([`tag.yml`](.github/workflows/tag.yml)):
+the next patch version, or the next minor or major version if the PR has a
+`release: minor` or `release: major` label. Use major for breaking changes, such as a removed
+input. Tags can't be moved or deleted.
+
+Calling repos' Dependabot sees new tags and opens a PR bumping their pins, grouped and
+without the 7-day cooldown that applies to third-party updates.
 
 ## How it works
 
