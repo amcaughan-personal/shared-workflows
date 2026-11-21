@@ -4,7 +4,7 @@ name: python-checks
 #
 #   jobs:
 #     python:
-#       uses: amcaughan-personal/shared_workflows/.github/workflows/python-checks.yml@<commit sha on main>
+#       uses: amcaughan-personal/shared-workflows/.github/workflows/python-checks.yml@<commit sha on main>
 
 on:
   workflow_call:

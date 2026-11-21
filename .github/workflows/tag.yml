@@ -4,7 +4,7 @@ name: tag
 # their pins (they pin the commit SHA, with the version in a comment). The merged PR's
 # label picks the bump: "release: major" (breaking change for callers), "release: minor"
 # (new, backwards-compatible inputs or behaviour), otherwise patch. Tags are protected
-# from being moved or deleted (personal_infra).
+# from being moved or deleted (personal-infra).
 
 on:
   push:
