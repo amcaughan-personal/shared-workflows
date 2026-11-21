@@ -15,10 +15,10 @@ on:
         required: false
         default: "."
       python_version:
-        description: "Python version to test with"
+        description: "Python version to test with (default: the repo's .python-version, as uv reads it)"
         type: string
         required: false
-        default: "3.12"
+        default: ""
       pytest_args:
         description: "Extra arguments for pytest"
         type: string
