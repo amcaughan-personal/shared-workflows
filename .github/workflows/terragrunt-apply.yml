@@ -1,0 +1,213 @@
+name: terragrunt-apply
+
+# `terragrunt apply` of every stack under one directory (one environment), in dependency
+# order, from the tip of the default branch. Each stack is planned and that saved plan is
+# applied, unless it would destroy or replace anything: then the apply stops there, and
+# that stack (and the ones after it) are left for a local apply.
+#
+# Safe for public repos, like terragrunt-plan: output stays on the runner, the step summary
+# lists resource addresses and types only, and the job log shows only Terraform's one-line
+# error summaries, with the AWS account ID masked. Nothing is uploaded.
+
+on:
+  workflow_call:
+    inputs:
+      terragrunt_working_dir:
+        description: "One environment's stacks, e.g. infra/terragrunt/live/dev (each terragrunt.hcl below it is applied)"
+        type: string
+        required: true
+      environment:
+        description: "GitHub environment the job runs in; the apply role should trust only it (and it should allow only the default branch)"
+        type: string
+        required: true
+      aws_region:
+        description: "AWS region for the OIDC credentials"
+        type: string
+        required: true
+      report_title:
+        description: "Title of the step summary"
+        type: string
+        required: false
+        default: "Terragrunt apply"
+      terraform_version:
+        description: "Terraform version (default: from the repo's .tool-versions)"
+        type: string
+        required: false
+        default: ""
+      terragrunt_version:
+        description: "Terragrunt version, e.g. 1.2.2 (default: from the repo's .tool-versions)"
+        type: string
+        required: false
+        default: ""
+    secrets:
+      aws_role_arn:
+        description: "Apply role to assume via GitHub OIDC (a secret, so its account ID is masked)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    # One apply per environment at a time; a newer run waits rather than cancelling one
+    # that's applying.
+    concurrency:
+      group: terragrunt-apply-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Re-running an old run would apply old code over newer changes.
+      - name: Check this is the tip of the default branch
+        env:
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          tip="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          if [[ "$GITHUB_REF" != "refs/heads/$BRANCH" || "$GITHUB_SHA" != "$tip" ]]; then
+            echo "::error::Only the current tip of $BRANCH is applied ($GITHUB_REF at $GITHUB_SHA is not). Start a new run instead."
+            exit 1
+          fi
+
+      # The repo's .tool-versions is the one place versions are set; its dev image and
+      # root.hcl read the same file, so local runs and CI always match.
+      - name: Read tool versions
+        id: versions
+        env:
+          TERRAFORM: ${{ inputs.terraform_version }}
+          TERRAGRUNT: ${{ inputs.terragrunt_version }}
+        run: |
+          set -euo pipefail
+          from_file() { awk -v tool="$1" '$1 == tool {print $2}' .tool-versions 2>/dev/null || true; }
+          terraform=${TERRAFORM:-$(from_file terraform)}
+          terragrunt=${TERRAGRUNT:-$(from_file terragrunt)}
+          if [[ -z "$terraform" || -z "$terragrunt" ]]; then
+            echo "::error::Set terraform and terragrunt in .tool-versions (or pass the inputs)"
+            exit 1
+          fi
+          echo "terraform=$terraform" >> "$GITHUB_OUTPUT"
+          echo "terragrunt=${terragrunt#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ steps.versions.outputs.terraform }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        env:
+          VERSION: ${{ steps.versions.outputs.terragrunt }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/gruntwork-io/terragrunt/releases/download/v${VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/terragrunt_linux_amd64"
+          curl -fsSLO "$base/SHA256SUMS"
+          grep " terragrunt_linux_amd64\$" SHA256SUMS | sha256sum -c -
+          install -m 0755 terragrunt_linux_amd64 /usr/local/bin/terragrunt
+          terragrunt --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          role-session-name: gha-terragrunt-apply
+          mask-aws-account-id: true
+
+      # Full output goes to a file on the runner, never to the log. Stacks run in dependency
+      # order, each planned then applied from that plan, so a stack sees the outputs of the
+      # ones before it. The first stack that fails, or would destroy or replace anything,
+      # stops the run.
+      - name: Apply every stack
+        id: apply
+        env:
+          WORKING_DIR: ${{ inputs.terragrunt_working_dir }}
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+          TF_IN_AUTOMATION: "true"
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugins
+        run: |
+          set -uo pipefail
+          work="$RUNNER_TEMP/terragrunt-plans"
+          mkdir -p "$work" "$TF_PLUGIN_CACHE_DIR"
+          : > "$work/index.tsv"
+          stopped=0
+
+          cd "$WORKING_DIR" || exit 1
+          mapfile -t stacks < <(terragrunt find --dag --no-hidden)
+          if (( ${#stacks[@]} == 0 )); then
+            echo "::error::No terragrunt.hcl found under $WORKING_DIR"
+            exit 1
+          fi
+
+          errors() { grep -oE '(Error|ERROR):? .*' "$1" | sed -E 's/[0-9]{12}/************/g' | sort -u | head -20; }
+
+          for stack in "${stacks[@]}"; do
+            name="$(printf '%s' "$stack" | tr -c 'A-Za-z0-9._-' '_')"
+            log="$work/$name.log"
+            plan="$work/$name.tfplan"
+            json="$work/$name.json"
+
+            if (( stopped )); then
+              echo "skipped  $stack"
+              printf '%s\tskipped\t\n' "$stack" >> "$work/index.tsv"
+              continue
+            fi
+
+            if ! (cd "$stack" \
+                && terragrunt plan -input=false -no-color -lock-timeout=5m -out="$plan" \
+                && terragrunt show -json "$plan" > "$json") > "$log" 2>&1; then
+              stopped=1
+              echo "::group::FAILED   $stack (plan)"; errors "$log"; echo "::endgroup::"
+              printf '%s\tfailed\t\n' "$stack" >> "$work/index.tsv"
+            elif jq -e '[.resource_changes[]? | select(.change.actions | index("delete"))] | length > 0' "$json" > /dev/null; then
+              stopped=1
+              echo "::error::$stack would destroy or replace resources, so it isn't applied here. Apply it locally."
+              printf '%s\tblocked\t%s\n' "$stack" "$json" >> "$work/index.tsv"
+            elif (cd "$stack" && terragrunt apply -input=false -no-color -lock-timeout=5m "$plan") >> "$log" 2>&1; then
+              echo "applied  $stack: $(grep -oE 'Apply complete! Resources: [0-9]+ added, [0-9]+ changed, [0-9]+ destroyed' "$log" | tail -1)"
+              printf '%s\tok\t%s\n' "$stack" "$json" >> "$work/index.tsv"
+            else
+              stopped=1
+              echo "::group::FAILED   $stack (apply)"; errors "$log"; echo "::endgroup::"
+              printf '%s\tfailed\t\n' "$stack" >> "$work/index.tsv"
+            fi
+            rm -f "$plan"
+          done
+          echo "stopped=$stopped" >> "$GITHUB_OUTPUT"
+
+      # The report action lives in this repo, at the commit this workflow runs from.
+      - name: Checkout shared-workflows
+        if: ${{ !cancelled() && steps.apply.outcome == 'success' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .shared-workflows
+
+      - name: Build report
+        if: ${{ !cancelled() && steps.apply.outcome == 'success' }}
+        uses: ./.shared-workflows/.github/actions/terragrunt-plan-report
+        with:
+          title: ${{ inputs.report_title }}
+          plan_index_tsv: ${{ runner.temp }}/terragrunt-plans/index.tsv
+          out_markdown: ${{ runner.temp }}/terragrunt-apply.md
+
+      - name: Remove plan files
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/terragrunt-plans"
+
+      - name: Step summary
+        if: ${{ !cancelled() && steps.apply.outcome == 'success' }}
+        run: cat "$RUNNER_TEMP/terragrunt-apply.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any stack wasn't applied
+        if: ${{ steps.apply.outputs.stopped == '1' }}
+        run: exit 1
