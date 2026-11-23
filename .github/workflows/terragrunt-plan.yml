@@ -1,82 +1,41 @@
 name: terragrunt-plan
 
+# Read-only `terragrunt plan` of every stack in a repo, for pull requests in public repos.
+# Plan output stays on the runner: the PR comment and step summary list resource addresses
+# and types only, and the job log shows only Terraform's one-line error summaries, with the
+# AWS account ID masked. Nothing is uploaded.
+
 on:
   workflow_call:
     inputs:
       terragrunt_working_dir:
-        description: "Base directory containing the Terragrunt stacks"
+        description: "Directory searched for Terragrunt stacks (each terragrunt.hcl below it is planned)"
         type: string
         required: false
         default: "infra/terragrunt"
-      stack_paths:
-        description: "Newline-delimited stack paths relative to terragrunt_working_dir"
+      aws_region:
+        description: "AWS region for the OIDC credentials"
         type: string
         required: true
       report_title:
-        description: "Human-readable report title"
+        description: "Title of the PR comment and step summary"
         type: string
         required: false
-        default: "Terragrunt plan report"
-      report_artifact_name:
-        description: "Artifact name for the sanitized plan report"
-        type: string
-        required: false
-        default: "terragrunt-plan-report"
-      retention_days:
-        description: "Artifact retention period"
-        type: number
-        required: false
-        default: 7
+        default: "Terragrunt plan"
       terraform_version:
-        description: "Terraform version to install"
+        description: "Terraform version (default: from the repo's .tool-versions)"
         type: string
         required: false
-        default: "1.14.2"  # keep in step with the local dev images
+        default: ""
       terragrunt_version:
-        description: "Terragrunt version to install"
-        type: string
-        required: false
-        default: "v0.94.0"
-      terragrunt_plan_args:
-        description: "Extra args passed to terragrunt plan"
+        description: "Terragrunt version, e.g. 1.2.2 (default: from the repo's .tool-versions)"
         type: string
         required: false
         default: ""
-      aws_role_to_assume:
-        description: "Optional AWS role ARN to assume via GitHub OIDC before running plans"
-        type: string
-        required: false
-        default: ""
-      aws_region:
-        description: "AWS region used with aws_role_to_assume"
-        type: string
-        required: false
-        default: ""
-      post_pr_comment:
-        description: "Whether to upsert a PR comment when running on pull_request"
-        type: boolean
-        required: false
-        default: true
-      comment_name:
-        description: "Stable name used for the PR comment"
-        type: string
-        required: false
-        default: "terragrunt-plan-report"
-      markdown_summary_path:
-        description: "Markdown summary output path"
-        type: string
-        required: false
-        default: "out/terragrunt-plan-summary.md"
-      html_summary_path:
-        description: "HTML summary output path"
-        type: string
-        required: false
-        default: "out/terragrunt-plan-summary.html"
-      json_summary_path:
-        description: "JSON summary output path"
-        type: string
-        required: false
-        default: "out/terragrunt-plan-summary.json"
+    secrets:
+      aws_role_arn:
+        description: "Read-only plan role to assume via GitHub OIDC (a secret, so its account ID is masked)"
+        required: true
 
 permissions:
   contents: read
@@ -91,103 +50,128 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The repo's .tool-versions is the one place versions are set; its dev image and
+      # root.hcl read the same file, so local runs and CI always match.
+      - name: Read tool versions
+        id: versions
+        env:
+          TERRAFORM: ${{ inputs.terraform_version }}
+          TERRAGRUNT: ${{ inputs.terragrunt_version }}
+        run: |
+          set -euo pipefail
+          from_file() { awk -v tool="$1" '$1 == tool {print $2}' .tool-versions 2>/dev/null || true; }
+          terraform=${TERRAFORM:-$(from_file terraform)}
+          terragrunt=${TERRAGRUNT:-$(from_file terragrunt)}
+          if [[ -z "$terraform" || -z "$terragrunt" ]]; then
+            echo "::error::Set terraform and terragrunt in .tool-versions (or pass the inputs)"
+            exit 1
+          fi
+          echo "terraform=$terraform" >> "$GITHUB_OUTPUT"
+          echo "terragrunt=${terragrunt#v}" >> "$GITHUB_OUTPUT"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          terraform_version: ${{ inputs.terraform_version }}
+          terraform_version: ${{ steps.versions.outputs.terraform }}
           terraform_wrapper: false
 
       - name: Setup Terragrunt
-        shell: bash
+        env:
+          VERSION: ${{ steps.versions.outputs.terragrunt }}
         run: |
           set -euo pipefail
-          curl -fsSL "https://github.com/gruntwork-io/terragrunt/releases/download/${{ inputs.terragrunt_version }}/terragrunt_linux_amd64" \
-            -o /usr/local/bin/terragrunt
-          chmod +x /usr/local/bin/terragrunt
+          base="https://github.com/gruntwork-io/terragrunt/releases/download/v${VERSION}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/terragrunt_linux_amd64"
+          curl -fsSLO "$base/SHA256SUMS"
+          grep " terragrunt_linux_amd64\$" SHA256SUMS | sha256sum -c -
+          install -m 0755 terragrunt_linux_amd64 /usr/local/bin/terragrunt
           terragrunt --version
 
       - name: Configure AWS credentials
-        if: ${{ inputs.aws_role_to_assume != '' && inputs.aws_region != '' }}
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ inputs.aws_role_to_assume }}
+          role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: ${{ inputs.aws_region }}
           role-session-name: gha-terragrunt-plan
+          mask-aws-account-id: true
 
-      - name: Run Terragrunt plans
-        shell: bash
+      # Full output goes to a file on the runner, never to the log. A failed stack logs only
+      # Terraform's one-line "Error:" summaries, with any 12-digit number redacted.
+      - name: Plan every stack
+        id: plan
         env:
-          STACK_PATHS: ${{ inputs.stack_paths }}
+          WORKING_DIR: ${{ inputs.terragrunt_working_dir }}
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+          TF_IN_AUTOMATION: "true"
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugins
         run: |
-          set -euo pipefail
-          raw_dir="$RUNNER_TEMP/terragrunt-plans"
-          mkdir -p "$raw_dir"
-          : > "$raw_dir/index.tsv"
+          set -uo pipefail
+          plans="$RUNNER_TEMP/terragrunt-plans"
+          mkdir -p "$plans" "$TF_PLUGIN_CACHE_DIR"
+          : > "$plans/index.tsv"
+          failed=0
 
-          while IFS= read -r raw_stack_path; do
-            stack_path="$(printf '%s' "$raw_stack_path" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-            [[ -n "$stack_path" ]] || continue
+          mapfile -t stacks < <(find "$WORKING_DIR" -name terragrunt.hcl -not -path '*/.terragrunt-cache/*' -printf '%h\n' | sort)
+          if (( ${#stacks[@]} == 0 )); then
+            echo "::error::No terragrunt.hcl found under $WORKING_DIR"
+            exit 1
+          fi
 
-            stack_dir="${{ inputs.terragrunt_working_dir }}/$stack_path"
-            safe_stack="$(printf '%s' "$stack_path" | tr '/:' '__' | tr -c 'A-Za-z0-9._-' '_')"
-            plan_path="$raw_dir/${safe_stack}.tfplan"
-            json_path="$raw_dir/${safe_stack}.json"
+          for dir in "${stacks[@]}"; do
+            stack="${dir#"$WORKING_DIR"/}"
+            name="$(printf '%s' "$stack" | tr -c 'A-Za-z0-9._-' '_')"
+            log="$plans/$name.log"
+            if (cd "$dir" \
+                && terragrunt plan -input=false -no-color -out="$plans/$name.tfplan" \
+                && terragrunt show -json "$plans/$name.tfplan" > "$plans/$name.json") > "$log" 2>&1; then
+              echo "planned  $stack"
+              printf '%s\tok\t%s\n' "$stack" "$plans/$name.json" >> "$plans/index.tsv"
+            else
+              failed=1
+              echo "::group::FAILED   $stack"
+              grep -oE '(Error|ERROR):? .*' "$log" | sed -E 's/[0-9]{12}/************/g' | sort -u | head -20
+              echo "::endgroup::"
+              printf '%s\tfailed\t\n' "$stack" >> "$plans/index.tsv"
+            fi
+            rm -f "$plans/$name.tfplan"
+          done
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
 
-            echo "Planning $stack_path"
-
-            (
-              cd "$stack_dir"
-
-              cmd=(terragrunt --non-interactive plan -input=false -no-color -out "$plan_path")
-              if [[ -n "${{ inputs.terragrunt_plan_args }}" ]]; then
-                # shellcheck disable=SC2206
-                extra=(${{ inputs.terragrunt_plan_args }})
-                cmd+=("${extra[@]}")
-              fi
-
-              "${cmd[@]}"
-              terragrunt --non-interactive show -json "$plan_path" > "$json_path"
-            )
-
-            printf '%s\t%s\t%s\n' "$safe_stack" "$stack_path" "$json_path" >> "$raw_dir/index.tsv"
-          done <<< "$STACK_PATHS"
-
-      # The report actions live in this repo, at the commit this workflow runs from.
+      # The report action lives in this repo, at the commit this workflow runs from.
       - name: Checkout shared-workflows
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .shared-workflows
 
-      - name: Build sanitized plan report
+      - name: Build report
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         uses: ./.shared-workflows/.github/actions/terragrunt-plan-report
         with:
           title: ${{ inputs.report_title }}
           plan_index_tsv: ${{ runner.temp }}/terragrunt-plans/index.tsv
-          out_json: ${{ inputs.json_summary_path }}
-          out_markdown: ${{ inputs.markdown_summary_path }}
-          out_html: ${{ inputs.html_summary_path }}
+          out_markdown: ${{ runner.temp }}/terragrunt-plan.md
 
-      - name: Upload plan report artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ${{ inputs.report_artifact_name }}
-          path: |
-            ${{ inputs.json_summary_path }}
-            ${{ inputs.markdown_summary_path }}
-            ${{ inputs.html_summary_path }}
-          retention-days: ${{ inputs.retention_days }}
+      - name: Remove plan files
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/terragrunt-plans"
 
-      - name: Attach markdown summary to Step Summary
-        shell: bash
-        run: |
-          cat "${{ inputs.markdown_summary_path }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Step summary
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
+        run: cat "$RUNNER_TEMP/terragrunt-plan.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Comment report on PR (upsert)
-        if: ${{ inputs.post_pr_comment && github.event_name == 'pull_request' }}
+      - name: Comment on PR
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name == 'pull_request' }}
         uses: ./.shared-workflows/.github/actions/comment-pr
         with:
-          comment_name: ${{ inputs.comment_name }}
-          body_file: ${{ inputs.markdown_summary_path }}
+          comment_name: terragrunt-plan
+          body_file: ${{ runner.temp }}/terragrunt-plan.md
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fail if any stack failed to plan
+        if: ${{ steps.plan.outputs.failed == '1' }}
+        run: exit 1
