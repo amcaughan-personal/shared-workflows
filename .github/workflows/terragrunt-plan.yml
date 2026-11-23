@@ -141,7 +141,7 @@ jobs:
 
       # The report action lives in this repo, at the commit this workflow runs from.
       - name: Checkout shared-workflows
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
@@ -149,7 +149,7 @@ jobs:
           path: .shared-workflows
 
       - name: Build report
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         uses: ./.shared-workflows/.github/actions/terragrunt-plan-report
         with:
           title: ${{ inputs.report_title }}
@@ -161,11 +161,11 @@ jobs:
         run: rm -rf "$RUNNER_TEMP/terragrunt-plans"
 
       - name: Step summary
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         run: cat "$RUNNER_TEMP/terragrunt-plan.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment on PR
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && github.event_name == 'pull_request' }}
         uses: ./.shared-workflows/.github/actions/comment-pr
         with:
           comment_name: terragrunt-plan
