@@ -115,25 +115,24 @@ def render_markdown(summary: dict) -> str:
             "Apply those locally.",
         ]
 
+    # Every stack is a collapsible block, so they all line up whatever their status.
     for stack in summary["stacks"]:
-        path = stack["stack_path"]
-        lines.append("")
-        if stack["status"] == "failed":
-            lines.append(f"- ❌ `{path}`: failed")
-            continue
-        if stack["status"] == "skipped":
-            lines.append(f"- ⏭️ `{path}`: not run (an earlier stack stopped)")
-            continue
+        path = f"<code>{stack['stack_path']}</code>"
         counts = stack["counts"]
-        if not stack["resources"]:
-            lines.append(f"- `{path}`: no changes")
-            continue
-        badges = " ".join(f"{ACTION_EMOJI[a]} {counts[a]}" for a in ACTION_ORDER if counts[a])
-        mark = "⛔ " if stack["status"] == "blocked" else ""
-        lines += [f"<details><summary>{mark}<code>{path}</code>: {badges}</summary>", ""]
-        for resource in stack["resources"]:
-            lines.append(f"- {ACTION_EMOJI[resource['action']]} `{resource['address']}` (`{resource['type']}`)")
-        lines += ["", "</details>"]
+        if stack["status"] == "failed":
+            heading, body = f"❌ {path}: failed", ["Error summaries are in the job log."]
+        elif stack["status"] == "skipped":
+            heading, body = f"⏭️ {path}: not run", ["An earlier stack stopped the run."]
+        elif not stack["resources"]:
+            heading, body = f"{path}: no changes", ["No changes."]
+        else:
+            badges = " ".join(f"{ACTION_EMOJI[a]} {counts[a]}" for a in ACTION_ORDER if counts[a])
+            mark = "⛔ " if stack["status"] == "blocked" else ""
+            heading = f"{mark}{path}: {badges}"
+            body = [
+                f"- {ACTION_EMOJI[r['action']]} `{r['address']}` (`{r['type']}`)" for r in stack["resources"]
+            ]
+        lines += ["", f"<details><summary>{heading}</summary>", "", *body, "", "</details>"]
 
     return "\n".join(lines).strip() + "\n"
 
