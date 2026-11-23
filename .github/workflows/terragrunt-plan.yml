@@ -69,7 +69,8 @@ jobs:
         with:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: ${{ inputs.aws_region }}
-          role-session-name: gha-terragrunt-plan
+          # CloudTrail records this name, so each AWS change leads back to its workflow run.
+          role-session-name: gha-terragrunt-plan-${{ github.run_id }}-${{ github.run_attempt }}
           mask-aws-account-id: true
 
       # Full output goes to a file on the runner, never to the log. A failed stack logs only
