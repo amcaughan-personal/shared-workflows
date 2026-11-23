@@ -3,7 +3,9 @@ name: terragrunt-apply
 # `terragrunt apply` of every stack under one directory (one environment), in dependency
 # order, from the tip of the default branch. Each stack is planned and that saved plan is
 # applied, unless it would destroy or replace anything: then the apply stops there, and
-# that stack (and the ones after it) are left for a local apply.
+# that stack (and the ones after it) are left for a local apply. With
+# preview_terragrunt_working_dir, a clean apply is followed by a read-only plan of another
+# environment (e.g. prod after dev), shown in the summary before that one is approved.
 #
 # Safe for public repos, like terragrunt-plan: output stays on the runner, the step summary
 # lists resource addresses and types only, and the job log shows only Terraform's one-line
@@ -29,6 +31,16 @@ on:
         type: string
         required: false
         default: "Terragrunt apply"
+      preview_terragrunt_working_dir:
+        description: "Another environment's stacks to plan (read-only) after a clean apply, e.g. prod's after dev's, so whoever approves that environment's apply sees its plan in this run's summary"
+        type: string
+        required: false
+        default: ""
+      preview_title:
+        description: "Title of the preview in the step summary"
+        type: string
+        required: false
+        default: "Next environment's plan"
       terraform_version:
         description: "Terraform version (default: from the repo's .tool-versions)"
         type: string
@@ -160,6 +172,24 @@ jobs:
           done
           echo "stopped=$stopped" >> "$GITHUB_OUTPUT"
 
+      # Read-only, and without taking the other environment's state locks. If its plan
+      # fails, the summary says so; this environment's apply has still succeeded.
+      - name: Preview the next environment
+        id: preview
+        if: ${{ !cancelled() && inputs.preview_terragrunt_working_dir != '' && steps.apply.outputs.stopped == '0' }}
+        env:
+          PREVIEW_DIR: ${{ inputs.preview_terragrunt_working_dir }}
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+          TF_IN_AUTOMATION: "true"
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugins
+        run: |
+          set -uo pipefail
+          status=0
+          bash .shared-workflows/.github/scripts/plan-stacks.sh "$PREVIEW_DIR" "$RUNNER_TEMP/terragrunt-preview" -lock=false || status=$?
+          if (( status == 1 )); then echo "::warning::The preview of $PREVIEW_DIR failed; see the summary."; fi
+          if (( status == 2 )); then exit 1; fi
+
       - name: Build report
         if: ${{ !cancelled() && steps.apply.outcome == 'success' }}
         uses: ./.shared-workflows/.github/actions/terragrunt-plan-report
@@ -168,13 +198,26 @@ jobs:
           plan_index_tsv: ${{ runner.temp }}/terragrunt-plans/index.tsv
           out_markdown: ${{ runner.temp }}/terragrunt-apply.md
 
+      - name: Build preview report
+        if: ${{ !cancelled() && steps.preview.outcome == 'success' }}
+        uses: ./.shared-workflows/.github/actions/terragrunt-plan-report
+        with:
+          title: ${{ inputs.preview_title }}
+          plan_index_tsv: ${{ runner.temp }}/terragrunt-preview/index.tsv
+          out_markdown: ${{ runner.temp }}/terragrunt-preview.md
+
       - name: Remove plan files
         if: ${{ always() }}
-        run: rm -rf "$RUNNER_TEMP/terragrunt-plans"
+        run: rm -rf "$RUNNER_TEMP/terragrunt-plans" "$RUNNER_TEMP/terragrunt-preview"
 
       - name: Step summary
         if: ${{ !cancelled() && steps.apply.outcome == 'success' }}
-        run: cat "$RUNNER_TEMP/terragrunt-apply.md" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          cat "$RUNNER_TEMP/terragrunt-apply.md" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f "$RUNNER_TEMP/terragrunt-preview.md" ]]; then
+            printf '\n' >> "$GITHUB_STEP_SUMMARY"
+            cat "$RUNNER_TEMP/terragrunt-preview.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Fail if any stack wasn't applied
         if: ${{ steps.apply.outputs.stopped == '1' }}

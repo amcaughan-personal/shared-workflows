@@ -85,36 +85,11 @@ jobs:
           TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/terraform-plugins
         run: |
           set -uo pipefail
-          plans="$RUNNER_TEMP/terragrunt-plans"
-          mkdir -p "$plans" "$TF_PLUGIN_CACHE_DIR"
-          : > "$plans/index.tsv"
-          failed=0
-
-          mapfile -t stacks < <(find "$WORKING_DIR" -name terragrunt.hcl -not -path '*/.terragrunt-cache/*' -printf '%h\n' | sort)
-          if (( ${#stacks[@]} == 0 )); then
-            echo "::error::No terragrunt.hcl found under $WORKING_DIR"
-            exit 1
-          fi
-
-          for dir in "${stacks[@]}"; do
-            stack="${dir#"$WORKING_DIR"/}"
-            name="$(printf '%s' "$stack" | tr -c 'A-Za-z0-9._-' '_')"
-            log="$plans/$name.log"
-            if (cd "$dir" \
-                && terragrunt plan -input=false -no-color -out="$plans/$name.tfplan" \
-                && terragrunt show -json "$plans/$name.tfplan" > "$plans/$name.json") > "$log" 2>&1; then
-              echo "planned  $stack"
-              printf '%s\tok\t%s\n' "$stack" "$plans/$name.json" >> "$plans/index.tsv"
-            else
-              failed=1
-              echo "::group::FAILED   $stack"
-              grep -oE '(Error|ERROR):? .*' "$log" | sed -E 's/[0-9]{12}/************/g' | sort -u | head -20
-              echo "::endgroup::"
-              printf '%s\tfailed\t\n' "$stack" >> "$plans/index.tsv"
-            fi
-            rm -f "$plans/$name.tfplan"
-          done
-          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          status=0
+          bash .shared-workflows/.github/scripts/plan-stacks.sh "$WORKING_DIR" "$RUNNER_TEMP/terragrunt-plans" || status=$?
+          if (( status == 2 )); then exit 1; fi
+          echo "failed=$(( status ? 1 : 0 ))" >> "$GITHUB_OUTPUT"
 
       - name: Build report
         if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
