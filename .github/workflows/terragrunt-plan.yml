@@ -1,6 +1,7 @@
 name: terragrunt-plan
 
-# Read-only `terragrunt plan` of every stack in a repo, for pull requests in public repos.
+# Read-only `terragrunt plan` of every stack in a repo, for pull requests in public repos, or
+# on a schedule with fail_on_changes as a drift check.
 # Plan output stays on the runner: the PR comment and step summary list resource addresses
 # and types only, and the job log shows only Terraform's one-line error summaries, with the
 # AWS account ID masked. Nothing is uploaded.
@@ -22,6 +23,11 @@ on:
         type: string
         required: false
         default: "Terragrunt plan"
+      fail_on_changes:
+        description: "Fail if any stack has changes, e.g. for a scheduled drift check: AWS no longer matches the code on the branch"
+        type: boolean
+        required: false
+        default: false
       terraform_version:
         description: "Terraform version (default: from the repo's .tool-versions)"
         type: string
@@ -101,6 +107,18 @@ jobs:
           plan_index_tsv: ${{ runner.temp }}/terragrunt-plans/index.tsv
           out_markdown: ${{ runner.temp }}/terragrunt-plan.md
 
+      - name: Fail on changes
+        id: changes
+        if: ${{ !cancelled() && inputs.fail_on_changes && steps.plan.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          mapfile -t plans < <(cut -f3 "$RUNNER_TEMP/terragrunt-plans/index.tsv" | grep . || true)
+          changes=0
+          if (( ${#plans[@]} )); then
+            changes=$(jq -s 'map([.resource_changes[]? | select(.change.actions != ["no-op"] and .change.actions != ["read"])] | length) | add' "${plans[@]}")
+          fi
+          echo "changes=$changes" >> "$GITHUB_OUTPUT"
+
       - name: Remove plan files
         if: ${{ always() }}
         run: rm -rf "$RUNNER_TEMP/terragrunt-plans"
@@ -120,3 +138,11 @@ jobs:
       - name: Fail if any stack failed to plan
         if: ${{ steps.plan.outputs.failed == '1' }}
         run: exit 1
+
+      - name: Fail if anything would change
+        if: ${{ steps.changes.outputs.changes != '' && steps.changes.outputs.changes != '0' }}
+        env:
+          CHANGES: ${{ steps.changes.outputs.changes }}
+        run: |
+          echo "::error::$CHANGES resource change(s): AWS doesn't match the code on $GITHUB_REF_NAME (drift, or a change not applied yet). The summary lists them."
+          exit 1
