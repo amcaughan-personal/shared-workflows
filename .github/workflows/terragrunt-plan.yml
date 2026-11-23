@@ -87,7 +87,9 @@ jobs:
           set -uo pipefail
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
           status=0
-          bash .shared-workflows/.github/scripts/plan-stacks.sh "$WORKING_DIR" "$RUNNER_TEMP/terragrunt-plans" || status=$?
+          # No state locks: a plan changes nothing, and a run cancelled by a newer push would
+          # leave its lock behind, blocking the next plan or apply.
+          bash .shared-workflows/.github/scripts/plan-stacks.sh "$WORKING_DIR" "$RUNNER_TEMP/terragrunt-plans" -lock=false || status=$?
           if (( status == 2 )); then exit 1; fi
           echo "failed=$(( status ? 1 : 0 ))" >> "$GITHUB_OUTPUT"
 
