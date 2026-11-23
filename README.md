@@ -46,4 +46,5 @@ without the 7-day cooldown that applies to third-party updates.
 ## How it works
 
 - Workflows that use this repo's composite actions (`.github/actions/`) check out this repo at `job.workflow_sha`, the commit the reusable workflow itself runs from. A plain `uses: ./.github/actions/...` would resolve against the *calling* repo's checkout and fail.
+- `setup-terragrunt` installs Terraform and Terragrunt at the versions in the calling repo's `.tool-versions` for `format-check`, `terragrunt-plan` and `terragrunt-apply`. Terragrunt is checksum-verified, cached per version, and its download retried (GitHub release downloads fail now and then).
 - Inputs reach shell scripts through `env:` rather than `${{ }}` interpolation.
