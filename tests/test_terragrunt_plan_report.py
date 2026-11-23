@@ -99,7 +99,29 @@ class TerragruntPlanReportTests(unittest.TestCase):
         markdown = terragrunt_plan_report.render_markdown(summary)
 
         self.assertEqual(summary["failed"], ["live/prod/broken"])
-        self.assertIn("`live/prod/broken`: plan failed", markdown)
+        self.assertIn("`live/prod/broken`: failed", markdown)
+
+    def test_blocked_and_skipped_stacks_in_an_apply(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan = write_plan(
+                Path(temp_dir) / "plan.json",
+                [("aws_s3_bucket.raw", "aws_s3_bucket", ["delete", "create"])],
+            )
+            summary = terragrunt_plan_report.build_summary(
+                "Apply",
+                [
+                    terragrunt_plan_report.StackPlan("live/prod/raw-zone", "blocked", plan),
+                    terragrunt_plan_report.StackPlan("live/prod/ingest", "skipped", None),
+                ],
+            )
+        markdown = terragrunt_plan_report.render_markdown(summary)
+
+        self.assertEqual(summary["blocked"], ["live/prod/raw-zone"])
+        self.assertEqual(summary["failed"], [])
+        self.assertEqual(summary["totals"]["replace"], 1)
+        self.assertIn("1 stack(s) not applied", markdown)
+        self.assertIn("⛔ <code>live/prod/raw-zone</code>", markdown)
+        self.assertIn("`live/prod/ingest`: not run", markdown)
 
     def test_load_plan_index_reads_status_and_optional_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:

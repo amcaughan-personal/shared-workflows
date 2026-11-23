@@ -4,6 +4,10 @@
 The report lists each stack's resource changes by address and type only: no attribute
 values, no plan output, no error text. Twelve-digit numbers (AWS account IDs) are
 redacted as a backstop, in case one appears in a resource address.
+
+Used for plans and applies. A stack's status is ok (planned, or applied), blocked (planned
+but not applied, because it would destroy or replace something), failed, or skipped (not
+run, because an earlier stack stopped the apply).
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ ACCOUNT_ID = re.compile(r"(?<!\d)\d{12}(?!\d)")
 @dataclass(frozen=True)
 class StackPlan:
     stack_path: str
-    status: str  # "ok" or "failed"
+    status: str  # "ok", "blocked", "failed" or "skipped"
     plan_json_path: Path | None
 
 
@@ -40,7 +44,7 @@ def normalize_actions(actions: list[str]) -> str | None:
 
 
 def load_plan_index(path: Path) -> list[StackPlan]:
-    """Each line: stack path, status (ok/failed), plan JSON path (empty when failed)."""
+    """Each line: stack path, status, plan JSON path (empty when failed or skipped)."""
     stacks = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -51,8 +55,9 @@ def load_plan_index(path: Path) -> list[StackPlan]:
 
 
 def summarize_stack(stack: StackPlan) -> dict:
-    if stack.status != "ok" or stack.plan_json_path is None:
-        return {"stack_path": stack.stack_path, "failed": True, "counts": {}, "resources": []}
+    if stack.status not in ("ok", "blocked") or stack.plan_json_path is None:
+        status = "skipped" if stack.status == "skipped" else "failed"
+        return {"stack_path": stack.stack_path, "status": status, "counts": {}, "resources": []}
 
     plan = json.loads(stack.plan_json_path.read_text(encoding="utf-8"))
     resources = []
@@ -70,7 +75,7 @@ def summarize_stack(stack: StackPlan) -> dict:
     counts = Counter(r["action"] for r in resources)
     return {
         "stack_path": stack.stack_path,
-        "failed": False,
+        "status": stack.status,
         "counts": {action: counts.get(action, 0) for action in ACTION_ORDER},
         "resources": resources,
     }
@@ -84,7 +89,8 @@ def build_summary(title: str, stacks: list[StackPlan]) -> dict:
     return {
         "title": title,
         "totals": {action: totals.get(action, 0) for action in ACTION_ORDER},
-        "failed": [s["stack_path"] for s in summaries if s["failed"]],
+        "failed": [s["stack_path"] for s in summaries if s["status"] == "failed"],
+        "blocked": [s["stack_path"] for s in summaries if s["status"] == "blocked"],
         "stacks": summaries,
     }
 
@@ -101,20 +107,30 @@ def render_markdown(summary: dict) -> str:
     for action in ACTION_ORDER:
         lines.append(f"| {ACTION_EMOJI[action]} {ACTION_LABELS[action]} | {summary['totals'][action]} |")
     if summary["failed"]:
-        lines += ["", f"**❌ {len(summary['failed'])} stack(s) failed to plan.** Error summaries are in the job log."]
+        lines += ["", f"**❌ {len(summary['failed'])} stack(s) failed.** Error summaries are in the job log."]
+    if summary["blocked"]:
+        lines += [
+            "",
+            f"**⛔ {len(summary['blocked'])} stack(s) not applied:** they would destroy or replace resources. "
+            "Apply those locally.",
+        ]
 
     for stack in summary["stacks"]:
         path = stack["stack_path"]
         lines.append("")
-        if stack["failed"]:
-            lines.append(f"- ❌ `{path}`: plan failed")
+        if stack["status"] == "failed":
+            lines.append(f"- ❌ `{path}`: failed")
+            continue
+        if stack["status"] == "skipped":
+            lines.append(f"- ⏭️ `{path}`: not run (an earlier stack stopped)")
             continue
         counts = stack["counts"]
         if not stack["resources"]:
             lines.append(f"- `{path}`: no changes")
             continue
         badges = " ".join(f"{ACTION_EMOJI[a]} {counts[a]}" for a in ACTION_ORDER if counts[a])
-        lines += [f"<details><summary><code>{path}</code>: {badges}</summary>", ""]
+        mark = "⛔ " if stack["status"] == "blocked" else ""
+        lines += [f"<details><summary>{mark}<code>{path}</code>: {badges}</summary>", ""]
         for resource in stack["resources"]:
             lines.append(f"- {ACTION_EMOJI[resource['action']]} `{resource['address']}` (`{resource['type']}`)")
         lines += ["", "</details>"]
