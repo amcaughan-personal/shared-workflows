@@ -1,0 +1,54 @@
+name: kubernetes-check
+
+# Validates a repo's Kubernetes manifests with kubeconform: every plain manifest, and every
+# kustomization rendered with kubectl kustomize, against Kubernetes' schemas and, for custom
+# resources, the community CRDs-catalog. kubectl and kubeconform come from the repo's
+# .tool-versions.
+
+on:
+  workflow_call:
+    inputs:
+      manifests_dir:
+        description: "Directory searched for manifests and kustomizations"
+        type: string
+        default: gitops
+      kubernetes_version:
+        description: "Kubernetes version whose schemas built-in kinds are checked against, e.g. 1.37.0"
+        type: string
+        default: master
+      crds_catalog_commit:
+        description: "Commit of github.com/datreeio/CRDs-catalog to take custom resource schemas from"
+        type: string
+        default: 04af58d740718c4dc719441bf39fb284c784f4a8
+
+permissions:
+  contents: read
+
+jobs:
+  kubeconform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The check script lives in this repo, at the commit this workflow runs from.
+      - name: Checkout shared-workflows
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .shared-workflows
+
+      - name: Install kubectl and kubeconform (versions from .tool-versions)
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: kubectl kubeconform
+
+      - name: Validate manifests
+        env:
+          MANIFESTS_DIR: ${{ inputs.manifests_dir }}
+          KUBERNETES_VERSION: ${{ inputs.kubernetes_version }}
+          CRDS_CATALOG_COMMIT: ${{ inputs.crds_catalog_commit }}
+        run: bash .shared-workflows/.github/scripts/kubernetes-check.sh "$MANIFESTS_DIR" "$CRDS_CATALOG_COMMIT" "$KUBERNETES_VERSION"
