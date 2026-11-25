@@ -64,6 +64,7 @@ jobs:
   # silently skipping a scan.
   select:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       checkov: ${{ steps.select.outputs.checkov }}
       trivy: ${{ steps.select.outputs.trivy }}

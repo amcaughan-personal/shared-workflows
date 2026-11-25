@@ -70,6 +70,8 @@ env:
 jobs:
   trivy:
     runs-on: ubuntu-latest
+    # A scan normally takes under a minute; a hung one fails here instead of after six hours.
+    timeout-minutes: 15
     outputs:
       artifact_name: ${{ steps.out.outputs.artifact_name }}
       sarif_path: ${{ steps.out.outputs.sarif_path }}
