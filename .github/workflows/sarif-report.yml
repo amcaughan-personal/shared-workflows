@@ -45,6 +45,8 @@ permissions:
 jobs:
   report:
     runs-on: ubuntu-latest
+    # A scan normally takes under a minute; a hung one fails here instead of after six hours.
+    timeout-minutes: 15
     if: ${{ always() }}
 
     steps:
